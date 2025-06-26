@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asistente de Trámites de Formosa</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        /* Custom scrollbar for chat-box */
+        .chat-box::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-box::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        .chat-box::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+
+        .chat-box::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Basic styling for messages, if Tailwind defaults aren't enough */
+        .message {
+            padding: 8px 12px;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            max-width: 80%;
+        }
+
+        .user-message {
+            background-color: #dbeafe; /* Blue-100 */
+            align-self: flex-end;
+            margin-left: auto;
+        }
+
+        .assistant-message {
+            background-color: #e5e7eb; /* Gray-200 */
+            align-self: flex-start;
+            margin-right: auto;
+        }
+
+        /* Ensure links within markdown are styled correctly */
+        .assistant-message a {
+            color: #2563eb; /* Blue-600 */
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col h-[80vh]">
+        <div class="bg-blue-600 text-white p-4 rounded-t-lg flex justify-between items-center">
+            <h1 class="text-xl font-semibold">Asistente de Trámites 🇦🇷</h1>
+            <button id="clearHistoryBtn" class="bg-blue-700 hover:bg-blue-800 text-white py-1 px-3 rounded-md text-sm">
+                Limpiar Chat
+            </button>
+        </div>
+
+        <div id="chat-box" class="flex-1 p-4 overflow-y-auto flex flex-col-reverse chat-box">
+            <div class="assistant-message message mt-auto">
+                Hola! Soy tu asistente virtual para trámites en Formosa. ¿En qué puedo ayudarte hoy?
+            </div>
+        </div>
+
+        <div class="p-4 border-t border-gray-200 flex items-center">
+            <input
+                type="text"
+                id="userInput"
+                class="flex-1 border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Escribe tu consulta aquí..."
+                onkeypress="handleKeyPress(event)"
+            >
+            <button
+                id="sendBtn"
+                class="ml-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+                Enviar
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const chatBox = document.getElementById('chat-box');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+
+        // Initialize marked.js with options if needed (optional, but good practice)
+        marked.setOptions({
+            gfm: true,      // Use GitHub Flavored Markdown
+            breaks: true,   // Add <br> on a single newline
+            // sanitize: true // Uncomment if you want to strip HTML from input (security)
+        });
+
+        // Function to display messages
+        function displayMessage(sender, messageText, isUser) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', isUser ? 'user-message' : 'assistant-message');
+
+            // Use marked.js to parse Markdown into HTML
+            // This is where links like [Descargar](URL) become clickable <a> tags
+            messageElement.innerHTML = marked.parse(messageText);
+
+            chatBox.prepend(messageElement); // Use prepend to add new messages at the top (for flex-col-reverse)
+            chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom if using flex-col (normal flow)
+                                                    // For flex-col-reverse, it will naturally appear at the bottom
+        }
+
+        // Function to send message to backend
+        async function sendMessage() {
+            const message = userInput.value.trim();
+            if (!message) return;
+
+            displayMessage('user', message, true);
+            userInput.value = ''; // Clear input immediately
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ mensaje: message })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    displayMessage('assistant', `Error: ${errorData.respuesta || 'Algo salió mal.'}`, false);
+                    return;
+                }
+
+                const data = await response.json();
+                displayMessage('assistant', data.respuesta, false);
+
+            } catch (error) {
+                console.error('Error sending message:', error);
+                displayMessage('assistant', 'Lo siento, no pude conectar con el servidor. Intenta de nuevo más tarde.', false);
+            }
+        }
+
+        // Handle Enter key press
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // Event Listeners
+        sendBtn.addEventListener('click', sendMessage);
+        clearHistoryBtn.addEventListener('click', async () => {
+            if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
+                try {
+                    const response = await fetch('/api/limpiar_historial', {
+                        method: 'POST'
+                    });
+                    if (response.ok) {
+                        chatBox.innerHTML = `
+                            <div class="assistant-message message mt-auto">
+                                Hola! Soy tu asistente virtual para trámites en Formosa. ¿En qué puedo ayudarte hoy?
+                            </div>
+                        `; // Clear all messages and add initial one
+                        displayMessage('assistant', 'Historial de conversación limpiado.', false);
+                    } else {
+                        const errorData = await response.json();
+                        alert(`Error al limpiar historial: ${errorData.mensaje}`);
+                    }
+                } catch (error) {
+                    console.error('Error clearing history:', error);
+                    alert('Error de red al intentar limpiar el historial.');
+                }
+            }
+        });
+
+        // Ensure the chat box starts scrolled to the bottom on load
+        // This is tricky with flex-col-reverse. A small timeout helps.
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }, 100);
+        });
+
+    </script>
+</body>
+</html>
