@@ -48,7 +48,7 @@ def scrape_tramite_data(url):
     }
 
     try:
-        response = requests.get(url, timeout=15) 
+        response = requests.get(url, timeout=50) 
         response.raise_for_status() 
         soup = BeautifulSoup(response.text, 'html.parser')
 

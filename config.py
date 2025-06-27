@@ -16,11 +16,13 @@ FORBIDDEN_WORDS = [
     "cagón", "cagona", "mierdoso", "pelotudazo", "ortiva", "orto", "reventado",
     "choto", "chota", "pajero", "pajera", "capo", "capo de mierda", "negro de mierda",
     "vago", "vaga", "hijueputa", "nderakore", "kyhyje", "mita'i", "pajagua",
-    "kuña kue", "mbarete", "porombo", "japu", "kaigue", "ñemby"
+    "kuña kue", "mbarete", "porombo", "japu", "kaigue", "ñemby","que me importa", "inutil", "asqueroso"
+    "bobo", "payaso", "pendejo", "bobito", "la puta madre", "negro", "negra", "puta", "puto"
+    
 ]
 
 WHITELIST_WORDS = [
-    "trámite", "solicitud", "documento", "ciudadano", "provincia", "formosa", "oficial"
+    "trámite", "solicitud", "documento", "ciudadano", "provincia", "formosa", "oficial","quiero hacerle", "me gustaria hacer"
 ]
 
 EMBEDDING_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"

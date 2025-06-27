@@ -523,7 +523,7 @@ URL del Trámite: {respuesta_contextual.get('url', 'No disponible')}
         "model": "mistralai/mistral-nemo:free",
         "messages": messages,
         "max_tokens": 1000,
-        "temperature": 0.5
+        "temperature": 0.8
     }
 
     try:
