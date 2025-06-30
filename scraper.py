@@ -1,222 +1,216 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from urllib.parse import urljoin, urldefrag, quote
 from bs4 import BeautifulSoup
 import re
+import os
+import json
 import logging
-from urllib.parse import quote
-import os 
 
 from config import BASE_URL, KNOWLEDGE_BASE_FILE
-from data_manager import load_knowledge_base, save_knowledge_base 
+from data_manager import load_knowledge_base, save_knowledge_base
 
 logger = logging.getLogger(__name__)
 
-def scrape_tramite_data(url):
-    """
-    Performs web scraping of the procedure page on formosa.gob.ar and extract all information.
-    Adapts extraction to search for content within tabs such as "Detalle", "Cuánto sale",
-    "Dónde se realiza", "Formularios" and "Normas".
-    Includes basic caching logic.
-    """
-    knowledge_base = load_knowledge_base()
-    
-    for entry in knowledge_base:
-        if entry.get('url') == url and entry.get('data'):
-            logger.info(f"Returning cached data for {url}")
-            return entry.get('data') 
+session = requests.Session()
+retries = Retry(total=5, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])
+session.mount("https://", HTTPAdapter(max_retries=retries))
 
-    logger.info(f"Scraping new data for {url}")
-    datos_tramite = {
-        'titulo': '',
-        'descripcion': '',
+PHONE_REGEX = re.compile(r"\+?54?\s*\(?0?370\)?[\s-]?\d+")
+EMAIL_REGEX = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def normalize_phone(raw):
+    digits = re.sub(r"\D", "", raw)
+    if digits.startswith('0'):
+        digits = digits.lstrip('0')
+    return f"+54 {digits}"
+
+
+def normalize_cost(raw):
+    match = re.search(r"\d+[\.,]?\d*", raw.replace('ARS',''))
+    return f"${match.group(0)}" if match else raw.strip()
+
+
+def split_address(raw):
+    return {'full': raw.strip()}
+
+
+def scrape_tramite_data(url):
+    kb = load_knowledge_base()
+    for entry in kb:
+        if entry.get('url') == url and entry.get('data'):
+            logger.info(f"Cached: {url}")
+            return entry['data']
+
+    logger.info(f"Scraping: {url}")
+    data = {
+        'titulo': None,
+        'descripcion': None,
         'requisitos': [],
-        'observaciones': '',
+        'costo': None,
+        'direccion': None,
+        'horarios': None,
+        'telefono': None,
+        'email': None,
+        'formularios': [],
+        'observaciones': [],
         'pasos': [],
-        'costo': '',
-        'direccion': '',
-        'coordenadas': '',
-        'horarios': '',
-        'telefono': '',
-        'email': '',
-        'sitio': '',
-        'responsable': '',
-        'modalidad': '',
-        'mapa_url': '',
-        'tiene_opciones_ubicacion': False,
-        'opciones_ubicacion': [],
-        'necesita_seleccion': False,
-        'formularios': []
+        'modalidad': None,
+        'duracion': None,
+        'normativa': [],
+        'destinatario': None,
+        'categoria': None,
+        'organismo': None,
+        'sitio_oficial': None,
+        'similares': [],
+        'externos': [],
+        'coordenadas': None,
+        'mapa_url': None,
+        'opciones_ubicacion': []
     }
 
     try:
-        response = requests.get(url, timeout=50) 
-        response.raise_for_status() 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, 'html.parser')
 
-        datos_tramite['titulo'] = soup.find('h2').get_text(strip=True) if soup.find('h2') else "Trámite no especificado"
+        # Título y descripción
+        data['titulo'] = soup.find('h2').get_text(strip=True) if soup.find('h2') else None
+        desc_p = soup.select_one('.bs-callout-info p')
+        data['descripcion'] = desc_p.get_text(' ', strip=True) if desc_p else None
 
-        content_div = soup.find('div', id='content')
-        if content_div:
-            tabs_nav = content_div.find('ul', class_='nav-tabs')
-            if tabs_nav:
-                for tab_link in tabs_nav.find_all('a'):
-                    tab_name = tab_link.get_text(strip=True).lower()
-                    tab_id = tab_link.get('href', '').replace('#', '')
-                    tab_pane = content_div.find('div', id=tab_id)
-                    if not tab_pane:
-                        continue
+        # Requisitos y observaciones
+        data['requisitos'] = [p.get_text(strip=True) for p in soup.select('.bs-callout-warning p')]
+        data['observaciones'] = [p.get_text(strip=True) for p in soup.select('.bs-callout-danger p')]
 
-                    if "detalle" in tab_name:
-                        desc_callout = tab_pane.find('div', class_='bs-callout bs-callout-info')
-                        if desc_callout:
-                            datos_tramite['descripcion'] = desc_callout.find('p').get_text(strip=True) if desc_callout.find('p') else ""
-                        req_callout = tab_pane.find('div', class_='bs-callout bs-callout-warning')
-                        if req_callout:
-                            req_p = req_callout.find('p')
-                            if req_p:
-                                req_text = req_p.get_text(separator='\n').strip()
-                                requisitos = [line.strip() for line in req_text.split('\n') if line.strip() and len(line.strip()) > 5]
-                                if requisitos:
-                                    datos_tramite['requisitos'] = requisitos
-                                else:
-                                    datos_tramite['requisitos'] = ["No se encontraron requisitos específicos."]
+        # Formularios
+        name = None
+        for row in soup.select('#formularios table tr'):
+            strong = row.find('strong')
+            if strong:
+                name = strong.get_text(strip=True)
+            link = row.find('a', href=True)
+            if link and name:
+                full_url = urljoin(BASE_URL, link['href'])
+                data['formularios'].append({'nombre': name, 'url': full_url})
+                name = None
 
-                    elif "observaciones" in tab_name or "observacion" in tab_name:
-                        obs_callout = tab_pane.find('div', class_='bs-callout bs-callout-danger')
-                        if obs_callout:
-                            obs_text = obs_callout.get_text(strip=True)
-                            if obs_text:
-                                obs_lines = re.split(r'<br\s*/>|\n|\.,\s*', obs_text)
-                                observaciones = [line.strip() for line in obs_lines if line.strip() and len(line.strip()) > 5]
-                                if len(observaciones) == 1 and len(observaciones[0]) > len(obs_text) * 0.8:
-                                    observaciones = obs_text # Keep as single string if it's one long paragraph
-                                datos_tramite['observaciones'] = observaciones
-                        else:
-                            datos_tramite['observaciones'] = "No se encontraron observaciones."
+        # Normas
+        name_n = None
+        for row in soup.select('#normas table tr'):
+            strong = row.find('strong')
+            if strong:
+                name_n = strong.get_text(strip=True)
+            link = row.find('a', href=True)
+            if link and name_n:
+                full_url = urljoin(BASE_URL, link['href'])
+                data['normativa'].append({'nombre': name_n, 'url': full_url})
+                name_n = None
 
-                    elif "formularios" in tab_name:
-                        form_links = tab_pane.find_all('a', href=True)
-                        for link in form_links:
-                            href = link['href'].lower()
-                            if href.endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx')):
-                                form_name = link.get_text(strip=True)
-                                if not form_name or len(form_name) < 3: # Try to get text from previous sibling if link text is too short
-                                    prev = link.find_previous(string=True)
-                                    form_name = prev.strip() if prev and len(prev.strip()) > 2 else "Formulario sin nombre"
-                                form_url = link['href']
-                                if not form_url.startswith('http'):
-                                    if form_url.startswith('/'):
-                                        form_url = BASE_URL + form_url
-                                    else:
-                                        base_url_current = '/'.join(url.split('/')[:3])
-                                        form_url = os.path.join(base_url_current, form_url.lstrip('/'))
-                                datos_tramite['formularios'].append({'nombre': form_name, 'url': form_url})
+        # Costo
+        cost_table = soup.select_one('#cuanto table')
+        if cost_table:
+            costos = []
+            for row in cost_table.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    descripcion = cols[0].get_text(" ", strip=True)
+                    valor = cols[1].get_text(" ", strip=True)
+                    costos.append({
+                        'descripcion': descripcion,
+                        'valor': valor
+                    })
+            data['costo'] = costos
+        else:
+            raw_cost = soup.find(text=re.compile(r'\$\s*\d+'))
+            data['costo'] = [{'descripcion': None, 'valor': raw_cost.strip()}] if raw_cost else []
+            
+        # Ubicaciones
+        for panel in soup.select('.panel-default'):
+            title = panel.select_one('.panel-title')
+            body = panel.select_one('.panel-body')
+            if title and body:
+                loc = {'nombre': title.get_text(strip=True)}
+                txt = body.get_text(' ', strip=True)
+                tel = re.search(PHONE_REGEX, txt)
+                mail = re.search(EMAIL_REGEX, txt)
+                addr_match = re.search(r'Domicilio:[^\n]+', txt)
+                hor = re.search(r'\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}', txt)
+                if tel: loc['telefono'] = normalize_phone(tel.group(0))
+                if mail: loc['email'] = mail.group(0)
+                if addr_match: loc['direccion'] = split_address(addr_match.group(0))
+                if hor: loc['horarios'] = hor.group(0)
+                data['opciones_ubicacion'].append(loc)
+        # Asignar primera ubicación a campos principales si única
+        if len(data['opciones_ubicacion']) == 1:
+            single = data['opciones_ubicacion'][0]
+            data['direccion'] = single.get('direccion')
+            data['telefono'] = single.get('telefono')
+            data['email'] = single.get('email')
+            data['horarios'] = single.get('horarios')
 
-                    elif "cuánto sale" in tab_name or "cuanto" in tab_name:
-                        cost_table = tab_pane.find('table')
-                        if cost_table:
-                            costos = []
-                            for row in cost_table.find_all('tr'):
-                                cols = row.find_all('td')
-                                if len(cols) >= 2:
-                                    desc = cols[0].get_text(strip=True)
-                                    valor = cols[1].get_text(strip=True)
-                                    costos.append({'descripcion': desc, 'valor': valor})
-                            datos_tramite['costo'] = costos if costos else "No se especifica costo."
-                        else:
-                            cost_text_match = re.search(r'Costo:\s*(.+)|Precio:\s*(.+)|(\$[\d\.,]+(?: ARS)?)', tab_pane.get_text(), re.IGNORECASE)
-                            if cost_text_match:
-                                datos_tramite['costo'] = cost_text_match.group(1) or cost_text_match.group(2) or cost_text_match.group(3)
+        # Pasos detallados
+        for step in soup.select('.steps .step'):
+            num = step.select_one('.number')
+            title_s = step.select_one('.step-wrapper h4')
+            desc_p = step.select_one('.step-wrapper p')
+            data['pasos'].append({
+                'numero': num.get_text(strip=True) if num else None,
+                'titulo': title_s.get_text(strip=True) if title_s else None,
+                'descripcion': desc_p.get_text(strip=True) if desc_p else None
+            })
 
-                    elif "dónde se realiza" in tab_name or "donde" in tab_name:
-                        panel_groups = tab_pane.find('div', class_='panel-group')
-                        if panel_groups:
-                            locations_found = []
-                            for panel in panel_groups.find_all('div', class_='panel-default'):
-                                loc_name_tag = panel.find('div', class_='panel-title')
-                                if loc_name_tag:
-                                    loc_name = loc_name_tag.get_text(strip=True).replace('Dirección del ', '')
-                                    loc_details = {}
-                                    panel_body = panel.find('div', class_='panel-body')
-                                    if panel_body:
-                                        for row in panel_body.find_all('tr'):
-                                            cols = row.find_all('td')
-                                            if len(cols) == 2:
-                                                key = cols[0].get_text(strip=True).replace(':', '').lower()
-                                                value = cols[1].get_text(strip=True)
-                                                if key == "domicilio":
-                                                    loc_details['direccion'] = value
-                                                elif key == "teléfono":
-                                                    loc_details['telefono'] = value
-                                                elif key == "e-mail":
-                                                    loc_details['email'] = value
-                                                elif key == "horario de atención":
-                                                    loc_details['horarios'] = value
-                                                elif key == "responsable":
-                                                    loc_details['responsable'] = value
-                                    if loc_name and loc_details:
-                                        locations_found.append({'nombre': loc_name, **loc_details})
-                            if len(locations_found) > 1:
-                                datos_tramite['tiene_opciones_ubicacion'] = True
-                                datos_tramite['necesita_seleccion'] = True
-                                datos_tramite['opciones_ubicacion'] = locations_found
-                            elif len(locations_found) == 1:
-                                datos_tramite['direccion'] = locations_found[0].get('direccion', '')
-                                datos_tramite['telefono'] = locations_found[0].get('telefono', '')
-                                datos_tramite['email'] = locations_found[0].get('email', '')
-                                datos_tramite['horarios'] = locations_found[0].get('horarios', '')
-                                datos_tramite['responsable'] = locations_found[0].get('responsable', '')
+        # Bloques de features adicionales (destinatario, categoría, etc.)
+        for fb in soup.select('.text-small.features-block'):
+            txt = fb.get_text(' ', strip=True)
+            if 'Trámite destinado a' in txt:
+                a = fb.find('a', href=True)
+                data['destinatario'] = a.get_text(strip=True) if a else None
+            if 'Tema:' in txt:
+                data['categoria'] = txt.split('Tema:',1)[1].strip()
+            if 'Organismo Responsable' in txt:
+                a = fb.find('a', href=True)
+                data['organismo'] = a.get_text(strip=True) if a else None
+            if 'Sitio Oficial' in txt:
+                a = fb.find('a', href=True)
+                data['sitio_oficial'] = urljoin(BASE_URL, a['href']) if a else None
+            if 'Duración Aproximada' in txt:
+                h6 = fb.find('h6')
+                data['duracion'] = h6.get_text(strip=True) if h6 else None
+            if 'Cómo se realiza' in txt:
+                strong = fb.find('strong')
+                data['modalidad'] = strong.get_text(strip=True) if strong else data['modalidad']
+            if 'Trámites similares' in txt:
+                for a in fb.select('.list-group a[href]'):
+                    data['similares'].append({'nombre': a.get_text(strip=True), 'url': urljoin(BASE_URL, a['href'])})
+            if 'Trámites Externos' in txt:
+                for a in fb.select('.list-group a[href]'):
+                    data['externos'].append({'nombre': a.get_text(strip=True), 'url': a['href']})
 
-                        if not datos_tramite['direccion'] and not datos_tramite['opciones_ubicacion']:
-                            address_patterns = [
-                                re.compile(r'(Sarmiento|Av\.|Avenida|Calle|Jonas Salk|25 de Mayo|Saavedra|Rivadavia|Moreno|Belgrano|Roca|Salta|Mitre)\s*(Nº)?\s*\d+\s*(?:[a-zA-ZáéíóúÁÉÍÓÚñÑ\s\d\-"\']*)?(?:CP\s*\d{4})?', re.IGNORECASE),
-                                re.compile(r'Domicilio\s*:\s*(.+)', re.IGNORECASE),
-                                re.compile(r'Direcci[óo]n\s*:\s*(.+)', re.IGNORECASE)
-                            ]
-                            for pattern in address_patterns:
-                                match = pattern.search(tab_pane.get_text())
-                                if match:
-                                    datos_tramite['direccion'] = match.group(0).replace('Domicilio:', '').replace('Dirección:', '').strip()
-                                    tel_match = re.search(r'Teléfono:\s*(\(?\d{3,4}\)?[\s-]?\d{6,8})', tab_pane.get_text())
-                                    if tel_match: datos_tramite['telefono'] = tel_match.group(1).strip()
-                                    email_match = re.search(r'E-mail:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', tab_pane.get_text())
-                                    if email_match: datos_tramite['email'] = email_match.group(1).strip()
-                                    horarios_match = re.search(r'Horario de Atención:\s*(.+)', tab_pane.get_text())
-                                    if horarios_match: datos_tramite['horarios'] = horarios_match.group(1).strip()
-                                    break
-
-        modalidad_block = soup.find(lambda tag: tag.name in ['h3', 'h4', 'h5', 'p'] and 'Cómo se realiza el trámite?' in tag.get_text(strip=True))
-        if modalidad_block:
-            modalidad_text_tag = modalidad_block.find_next('p')
-            if modalidad_text_tag:
-                datos_tramite['modalidad'] = modalidad_text_tag.get_text(strip=True)
-
-        sitio_block = soup.find(lambda tag: tag.name in ['h3', 'h4', 'h5', 'p'] and 'Sitio Oficial:' in tag.get_text(strip=True))
-        if sitio_block:
-            sitio_link = sitio_block.find('a', href=True)
-            if sitio_link:
-                datos_tramite['sitio'] = sitio_link.get('href')
-
-        if datos_tramite['direccion']:
-            direccion_completa = f"{datos_tramite['direccion']}, Formosa" if "formosa" not in datos_tramite['direccion'].lower() else datos_tramite['direccion']
-            encoded_address = quote(direccion_completa)
-            datos_tramite['mapa_url'] = f"https://www.google.com/maps/search/?api=1&query={encoded_address}"
-        if "verificacion-fisica-del-automotor" in url.lower() and not datos_tramite['direccion']:
-            datos_tramite['direccion'] = "Unidad de Tránsito - Pringles y Rivadavia, Formosa Capital"
-            datos_tramite['mapa_url'] = f"https://www.google.com/maps/search/?api=1&query={quote('Pringles y Rivadavia, Formosa Capital')}"
+        # Mapa usando dirección simple
+        if data.get('direccion'):
+            addr_text = data['direccion'].get('full', '') if isinstance(data['direccion'], dict) else ''
+            q = quote(addr_text + ', Formosa')
+            data['mapa_url'] = f"https://www.google.com/maps/search/?api=1&query={q}"
 
         os.makedirs(os.path.dirname(KNOWLEDGE_BASE_FILE), exist_ok=True)
-        found_in_kb = False
-        for i, entry in enumerate(knowledge_base):
-            if entry.get('url') == url:
-                knowledge_base[i]['data'] = datos_tramite
-                found_in_kb = True
+        found = False
+        for i, e in enumerate(kb):
+            if e['url'] == url:
+                kb[i]['data'] = data
+                found = True
                 break
-        if not found_in_kb:
-            knowledge_base.append({"url": url, "data": datos_tramite})
-            
-        save_knowledge_base(knowledge_base)
-        return datos_tramite
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error de red o HTTP al hacer scraping en {url}: {e}")
+        if not found:
+            kb.append({'url': url, 'data': data})
+        save_knowledge_base(kb)
+        return data
+    except Exception as e:
+        logger.error(f"Error scraping {url}: {e}")
         return None
+
+if __name__ == '__main__':
+    from utils_scraper import descubrir_urls_tramites, procesar_todos_los_tramites
+    urls = descubrir_urls_tramites()
+    procesar_todos_los_tramites()
