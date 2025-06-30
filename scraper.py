@@ -127,29 +127,38 @@ def scrape_tramite_data(url):
             raw_cost = soup.find(text=re.compile(r'\$\s*\d+'))
             data['costo'] = [{'descripcion': None, 'valor': raw_cost.strip()}] if raw_cost else []
             
-        # Ubicaciones
-        for panel in soup.select('.panel-default'):
-            title = panel.select_one('.panel-title')
+        # Ubicaciones: extraer múltiples sedes con detalle
+        for panel in soup.select('#donde .panel-default'):
+            title_tag = panel.select_one('.panel-title a')
             body = panel.select_one('.panel-body')
-            if title and body:
-                loc = {'nombre': title.get_text(strip=True)}
-                txt = body.get_text(' ', strip=True)
-                tel = re.search(PHONE_REGEX, txt)
-                mail = re.search(EMAIL_REGEX, txt)
-                addr_match = re.search(r'Domicilio:[^\n]+', txt)
-                hor = re.search(r'\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}', txt)
-                if tel: loc['telefono'] = normalize_phone(tel.group(0))
-                if mail: loc['email'] = mail.group(0)
-                if addr_match: loc['direccion'] = split_address(addr_match.group(0))
-                if hor: loc['horarios'] = hor.group(0)
-                data['opciones_ubicacion'].append(loc)
-        # Asignar primera ubicación a campos principales si única
+            if not (title_tag and body):
+                continue
+            loc = {'nombre': title_tag.get_text(strip=True)}
+            # Recorrer filas de la tabla dentro del panel
+            for tr in body.select('tr'):
+                cols = tr.find_all('td')
+                if len(cols) != 2:
+                    continue
+                key = cols[0].get_text(strip=True).rstrip(':').lower()
+                val = cols[1].get_text(' ', strip=True)
+                if 'domicilio' in key:
+                    loc['direccion'] = val
+                elif key.startswith('tel'):
+                    loc.setdefault('telefonos', []).append(normalize_phone(val))
+                elif 'e-mail' in key or 'email' in key:
+                    loc['email'] = val
+                elif 'responsable' in key:
+                    loc['responsable'] = val
+                elif 'horario' in key:
+                    loc['horarios'] = val
+            data['opciones_ubicacion'].append(loc)
+
         if len(data['opciones_ubicacion']) == 1:
-            single = data['opciones_ubicacion'][0]
-            data['direccion'] = single.get('direccion')
-            data['telefono'] = single.get('telefono')
-            data['email'] = single.get('email')
-            data['horarios'] = single.get('horarios')
+            loc0 = data['opciones_ubicacion'][0]
+            data['direccion'] = loc0.get('direccion')
+            data['telefono'] = loc0.get('telefonos')
+            data['email'] = loc0.get('email')
+            data['horarios'] = loc0.get('horarios')
 
         # Pasos detallados
         for step in soup.select('.steps .step'):
