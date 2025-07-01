@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, request, render_template, jsonify, session
 from flask_cors import CORS
 import logging
@@ -6,8 +7,9 @@ from urllib.parse import quote
 
 from config import SECRET_KEY, OPENROUTER_API_KEY
 from models import detectar_toxicidad
-from utils import generar_respuesta_contextual, llamar_ia_openrouter, buscar_tramites_inteligente # Import buscar_tramites_inteligente
-from rag_system import build_knowledge_base_embeddings
+# Asegúrate de importar _generar_respuesta_con_datos directamente de utils
+from utils import generar_respuesta_contextual, llamar_ia_openrouter, _generar_respuesta_con_datos 
+from rag_system import build_knowledge_base_embeddings # No se usa directamente en app.py, pero puede permanecer
 from rag_embedder import crear_embeddings
 from data_manager import load_knowledge_base, load_tramites_urls
 
@@ -29,10 +31,8 @@ with app.app_context():
     logger.info(f"Knowledge base con {len(knowledge_base)} entradas cargada.")
 
     logger.info("Generando embeddings de knowledge base...")
-    crear_embeddings()
+    crear_embeddings() # Asegúrate de que esto crea los embeddings si no existen
     logger.info("Embeddings generados.")
-
-
 
 
 @app.route('/', methods=['GET'])
@@ -58,8 +58,11 @@ def chat():
     historial = session.get('historial', [])
     current_tramite_data = session.get('current_tramite_data', None)
 
-    response_data = None
+    respuesta_para_usuario = None # Esta será la respuesta final que se envía al front-end
 
+    # =========================================================================
+    # Lógica para manejo de selección de ubicación
+    # =========================================================================
     if "seleccion_ubicacion" in session and mensaje.isdigit():
         try:
             selected_index = int(mensaje) - 1
@@ -69,6 +72,7 @@ def chat():
                 categoria_id = session["seleccion_ubicacion"]["categoria"]
                 original_datos_tramite = session["seleccion_ubicacion"].get("original_datos_tramite", {})
 
+                # Clonar y actualizar los datos del trámite con la ubicación seleccionada
                 datos_tramite_con_ubicacion = original_datos_tramite.copy()
                 datos_tramite_con_ubicacion.update({
                     'direccion': selected_location.get('direccion', ''),
@@ -76,75 +80,88 @@ def chat():
                     'telefono': selected_location.get('telefono', ''),
                     'email': selected_location.get('email', ''),
                     'responsable': selected_location.get('responsable', ''),
-                    'necesita_seleccion': False
+                    'necesita_seleccion': False # Ya se seleccionó
                 })
 
+                # Generar URL de mapa si hay dirección
                 if datos_tramite_con_ubicacion['direccion']:
                     dir_comp = datos_tramite_con_ubicacion['direccion']
+                    # Asegurarse de que "Formosa" se añade si no está presente
                     if "formosa" not in dir_comp.lower():
                         dir_comp += ", Formosa"
                     encoded_address = quote(dir_comp)
-                    datos_tramite_con_ubicacion['mapa_url'] = f"http://google.com/maps?q={encoded_address}" # Corrected Google Maps URL
+                    datos_tramite_con_ubicacion['mapa_url'] = f"http://google.com/maps?q={encoded_address}"
 
+                # Limpiar la sesión de selección de ubicación
                 session.pop("seleccion_ubicacion", None)
-                session['current_tramite_data'] = datos_tramite_con_ubicacion # Update current_tramite_data after location selection
+                # Actualizar el trámite actual en sesión con la ubicación ya elegida
+                session['current_tramite_data'] = datos_tramite_con_ubicacion
 
-                from utils import _generar_respuesta_con_datos
-                response_data = _generar_respuesta_con_datos(datos_tramite_con_ubicacion, mensaje, categoria_id)
-                respuesta_ia = llamar_ia_openrouter(mensaje, historial, context_override=response_data).get('respuesta', response_data['mensaje'])
-
-                respuesta = {
-                    "respuesta": respuesta_ia,
-                    "datos_estructurados": response_data,
+                # AHORA AQUÍ: Usar _generar_respuesta_con_datos directamente
+                # Esto es crucial: ya tenemos la información y el formato.
+                # NO LLAMAR A llamar_ia_openrouter AQUÍ.
+                respuesta_pre_formateada = _generar_respuesta_con_datos(datos_tramite_con_ubicacion, mensaje, categoria_id)
+                
+                respuesta_para_usuario = {
+                    "respuesta": respuesta_pre_formateada['mensaje'],
+                    "datos_estructurados": respuesta_pre_formateada, # Incluye todos los datos para depuración
                     "timestamp": datetime.now().isoformat()
                 }
+                logger.info(f"Respuesta generada por selección de ubicación: {respuesta_para_usuario['respuesta']}")
+
             else:
-                respuesta = {
-                    "respuesta": "Número de opción inválido. Elegí un número correcto de la lista.",
+                respuesta_para_usuario = {
+                    "respuesta": "Número de opción inválido. Por favor, elegí un número correcto de la lista.",
                     "error": True
                 }
         except Exception as e:
             logger.error(f"Error procesando selección de ubicación: {e}")
-            # Fallback to general AI call if error in selection processing
-            respuesta = llamar_ia_openrouter(mensaje, historial)
-            if respuesta.get('datos_estructurados'):
-                session['current_tramite_data'] = respuesta['datos_estructurados'].get('info', None) or respuesta['datos_estructurados'].get('datos_tramite_identificado', None)
+            # Si hay un error en la selección, se recurre al LLM para una respuesta general
+            respuesta_para_usuario = llamar_ia_openrouter(mensaje, historial)
+            # Si el LLM devuelve datos estructurados, actualizar current_tramite_data
+            if respuesta_para_usuario.get('datos_estructurados'):
+                session['current_tramite_data'] = respuesta_para_usuario['datos_estructurados'].get('info', None) or \
+                                                  respuesta_para_usuario['datos_estructurados'].get('datos_tramite_identificado', None)
 
+    # =========================================================================
+    # Lógica principal de RAG y LLM (cuando no hay selección de ubicación en curso)
+    # =========================================================================
     else:
-        use_current_tramite_context = False
-        if current_tramite_data:
-            specific_keywords = ["requisitos", "costo", "formularios", "ubicacion", "horarios", "pasos", "observaciones", "dónde", "cuánto", "descargar"]
-            if any(k in mensaje.lower() for k in specific_keywords):
-                use_current_tramite_context = True
-            else:
-                pass 
+        # Primero, intentar obtener una respuesta formateada por nuestra lógica RAG
+        response_data_from_gen = generar_respuesta_contextual(mensaje, historial, current_tramite_data)
 
-        if use_current_tramite_context and current_tramite_data:
-            logger.info(f"Passing current_tramite_data as context_override: {current_tramite_data.get('titulo')}")
-            respuesta = llamar_ia_openrouter(mensaje, historial, context_override={"tipo": "tramite_especifico", "info": current_tramite_data})
+        if response_data_from_gen.get('tipo') == 'no_encontrado' or response_data_from_gen.get('tipo') == 'error':
+            # Si la RAG no encontró un trámite o hubo un error en la búsqueda RAG,
+            # entonces y SOLO ENTONCES, llama al LLM para una respuesta general/fallback.
+            logger.info("RAG no encontró un trámite o hubo un error. Llamando a LLM para respuesta general.")
+            respuesta_para_usuario = llamar_ia_openrouter(mensaje, historial)
+            session.pop('current_tramite_data', None) # Limpiar contexto si el LLM no encontró nada
         else:
-            response_data_from_gen = generar_respuesta_contextual(mensaje, historial)
-            
-            if response_data_from_gen.get('tipo') == 'no_encontrado':
-                respuesta = llamar_ia_openrouter(mensaje, historial) 
-                session.pop('current_tramite_data', None) 
-            else:
-                respuesta = llamar_ia_openrouter(mensaje, historial, context_override=response_data_from_gen)
-                if response_data_from_gen.get('tipo') == 'seleccion_ubicacion':
-                    session['current_tramite_data'] = response_data_from_gen.get('original_datos_tramite', {}) or response_data_from_gen.get('datos_tramite_identificado', {})
-                else: 
-                    session['current_tramite_data'] = response_data_from_gen.get('info', {}) or response_data_from_gen.get('datos_tramite_identificado', {})
-
-        if respuesta.get('datos_estructurados') and respuesta['datos_estructurados'].get('tipo') == 'seleccion_ubicacion':
-            session["seleccion_ubicacion"] = {
-                "categoria": respuesta['datos_estructurados']['categoria'],
-                "opciones": respuesta['datos_estructurados']['opciones_ubicacion'],
-                "original_datos_tramite": respuesta['datos_estructurados'].get('original_datos_tramite', {})
+            # Si la RAG SÍ encontró un trámite y generó una respuesta formateada,
+            # usa esa respuesta directamente. NO LLAMAR AL LLM AQUÍ.
+            logger.info(f"RAG encontró trámite y generó respuesta: {response_data_from_gen.get('tipo')}")
+            respuesta_para_usuario = {
+                "respuesta": response_data_from_gen['mensaje'],
+                "datos_estructurados": response_data_from_gen, # Pasamos la estructura completa
+                "timestamp": datetime.now().isoformat()
             }
-            session['current_tramite_data'] = respuesta['datos_estructurados'].get('datos_tramite_identificado', {}) or respuesta['datos_estructurados'].get('original_datos_tramite', {})
+            # Actualizar current_tramite_data con la información del trámite identificado
+            session['current_tramite_data'] = response_data_from_gen.get('info', {}) or \
+                                              response_data_from_gen.get('datos_tramite_identificado', {})
 
-    if respuesta.get('error'):
-        return jsonify(respuesta), 500
+        # Si la respuesta de la RAG indica que se necesita selección de ubicación, guardar en sesión
+        if respuesta_para_usuario.get('datos_estructurados') and \
+           respuesta_para_usuario['datos_estructurados'].get('tipo') == 'seleccion_ubicacion':
+            session["seleccion_ubicacion"] = {
+                "categoria": respuesta_para_usuario['datos_estructurados']['categoria'],
+                "opciones": respuesta_para_usuario['datos_estructurados']['opciones_ubicacion'],
+                "original_datos_tramite": respuesta_para_usuario['datos_estructurados'].get('original_datos_tramite', {})
+            }
+            # current_tramite_data ya se actualizó arriba con el trámite original
+
+    # Manejo de errores final
+    if respuesta_para_usuario.get('error'):
+        return jsonify(respuesta_para_usuario), 500
 
     # Guardar historial en sesión
     if 'historial' not in session:
@@ -152,13 +169,13 @@ def chat():
 
     session['historial'].append({
         'usuario': mensaje,
-        'asistente': respuesta.get('respuesta', ''),
-        'datos_estructurados': respuesta.get('datos_estructurados'), 
+        'asistente': respuesta_para_usuario.get('respuesta', ''),
+        'datos_estructurados': respuesta_para_usuario.get('datos_estructurados'),
         'timestamp': datetime.now().isoformat()
     })
     session['historial'] = session['historial'][-10:]  # Limitar historial
 
-    return jsonify(respuesta)
+    return jsonify(respuesta_para_usuario)
 
 
 @app.route('/api/limpiar_historial', methods=['POST'])

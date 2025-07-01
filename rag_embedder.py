@@ -1,11 +1,16 @@
+# rag_embedder.py
 import os
 import json
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer, util
+import logging
 
 from config import KNOWLEDGE_BASE_FILE, EMBEDDING_MODEL_NAME
 
+logger = logging.getLogger(__name__)
+
+# Se carga el modelo una sola vez al inicio del módulo
 model = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
 EMBEDDINGS_FILE = "data/tramites_embeddings.json"
@@ -19,12 +24,18 @@ def crear_embeddings():
     embeddings = []
 
     for tramite in base:
-        texto = f"{tramite['data'].get('titulo', '')}. {tramite['data'].get('descripcion', '')}"
-        emb = model.encode(texto, convert_to_numpy=True).tolist()
+        # Asegúrate de que 'data' existe antes de intentar acceder a 'titulo' o 'descripcion'
+        titulo = tramite.get('data', {}).get('titulo', '')
+        descripcion = tramite.get('data', {}).get('descripcion', '')
+        texto = f"{titulo}. {descripcion}"
+        
+        # Corregido: Asignar el resultado de model.encode a la variable 'emb'
+        emb = model.encode(texto, convert_to_numpy=True).tolist() 
+        
         embeddings.append({
             "url": tramite["url"],
-            "titulo": tramite['data'].get("titulo", ""),
-            "embedding": emb
+            "titulo": titulo, 
+            "embedding": emb # 'emb' ahora está definido
         })
 
     with open(EMBEDDINGS_FILE, "w", encoding="utf-8") as f:
@@ -34,25 +45,57 @@ def crear_embeddings():
 
 
 def buscar_tramite_por_embedding(pregunta, top_k=1):
-    ...
-    with open(EMBEDDINGS_FILE, "r", encoding="utf-8") as f:
-        base_emb = json.load(f)
+    logger.debug(f"Iniciando búsqueda RAG con pregunta: {pregunta}")
+    
+    try:
+        if not os.path.exists(EMBEDDINGS_FILE):
+            logger.warning(f"Embeddings file not found: {EMBEDDINGS_FILE}. Creating embeddings now.")
+            crear_embeddings() # Intentar crear los embeddings si no existen
 
-    with open(KNOWLEDGE_BASE_FILE, "r", encoding="utf-8") as f:
-        base = json.load(f)
+        with open(EMBEDDINGS_FILE, "r", encoding="utf-8") as f:
+            base_emb = json.load(f)
+        logger.debug(f"Cargados {len(base_emb)} embeddings")
 
-    pregunta_emb = model.encode(pregunta, convert_to_numpy=True)
-    pregunta_emb = torch.tensor(pregunta_emb).float()
+        with open(KNOWLEDGE_BASE_FILE, "r", encoding="utf-8") as f:
+            base = json.load(f)
+        logger.debug(f"Cargados {len(base)} trámites en base de conocimiento")
 
-    similitudes = []
-    for tramite in base_emb:
-        emb_tramite = torch.tensor(np.array(tramite["embedding"])).float()
-        score = util.cos_sim(pregunta_emb, emb_tramite).item()
-        similitudes.append((score, tramite["url"]))
+        pregunta_emb = model.encode(pregunta, convert_to_numpy=True)
+        pregunta_emb = torch.tensor(pregunta_emb).float()
+        logger.debug("Embedding generado para la pregunta")
 
-    similitudes.sort(reverse=True)
-    mejores = similitudes[:top_k]
+        similitudes = []
+        for tramite in base_emb:
+            try:
+                # Asegurarse de que el embedding es una lista y convertirlo a tensor
+                emb_tramite = torch.tensor(tramite["embedding"]).float()
+                score = util.cos_sim(pregunta_emb, emb_tramite).item()
+                if tramite.get("url") is not None:  # Verificar que la URL no sea None
+                    similitudes.append((score, tramite["url"]))
+                else:
+                    logger.warning(f"Embedding encontrado sin URL válida: {tramite}")
+            except Exception as e:
+                logger.error(f"Error procesando embedding: {e}")
 
-    resultados = [t["data"] for t in base if t["url"] in [url for _, url in mejores]]
-    return resultados
+        similitudes.sort(reverse=True)
+        mejores = similitudes[:top_k]
+        logger.debug(f"Mejores similitudes encontradas: {mejores}")
 
+        resultados = []
+        # Buscar los trámites completos de la base de conocimiento usando las URLs de los mejores embeddings
+        mejores_urls = {url for _, url in mejores}
+        for t in base:
+            try:
+                # Modificado para asegurar que el 'data' del trámite se use correctamente
+                if t.get("url") in mejores_urls:
+                    resultados.append(t)
+            except Exception as e:
+                logger.error(f"Error procesando trámite de la base: {e}")
+
+        if not resultados:
+            logger.warning("No se encontraron datos válidos para las URLs relevantes")
+        return resultados
+
+    except Exception as e:
+        logger.error(f"Error en la búsqueda RAG: {e}")
+        return []
