@@ -1,4 +1,5 @@
-# rag_embedder.py
+# rag_embedder.py (asegúrate de que este archivo tenga estos cambios)
+
 import os
 import json
 import numpy as np
@@ -10,11 +11,11 @@ from config import KNOWLEDGE_BASE_FILE, EMBEDDING_MODEL_NAME
 
 logger = logging.getLogger(__name__)
 
-# Se carga el modelo una sola vez al inicio del módulo
 model = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
 EMBEDDINGS_FILE = "data/tramites_embeddings.json"
 
+SIMILARITY_THRESHOLD = 0.55
 
 def crear_embeddings():
     """Genera embeddings para todos los trámites y los guarda."""
@@ -24,18 +25,17 @@ def crear_embeddings():
     embeddings = []
 
     for tramite in base:
-        # Asegúrate de que 'data' existe antes de intentar acceder a 'titulo' o 'descripcion'
         titulo = tramite.get('data', {}).get('titulo', '')
         descripcion = tramite.get('data', {}).get('descripcion', '')
-        texto = f"{titulo}. {descripcion}"
         
-        # Corregido: Asignar el resultado de model.encode a la variable 'emb'
-        emb = model.encode(texto, convert_to_numpy=True).tolist() 
+        texto = f"{titulo}. {descripcion}" 
+        
+        emb = model.encode(texto, convert_to_numpy=True).tolist()
         
         embeddings.append({
             "url": tramite["url"],
             "titulo": titulo, 
-            "embedding": emb # 'emb' ahora está definido
+            "embedding": emb 
         })
 
     with open(EMBEDDINGS_FILE, "w", encoding="utf-8") as f:
@@ -50,7 +50,7 @@ def buscar_tramite_por_embedding(pregunta, top_k=1):
     try:
         if not os.path.exists(EMBEDDINGS_FILE):
             logger.warning(f"Embeddings file not found: {EMBEDDINGS_FILE}. Creating embeddings now.")
-            crear_embeddings() # Intentar crear los embeddings si no existen
+            crear_embeddings() 
 
         with open(EMBEDDINGS_FILE, "r", encoding="utf-8") as f:
             base_emb = json.load(f)
@@ -67,13 +67,19 @@ def buscar_tramite_por_embedding(pregunta, top_k=1):
         similitudes = []
         for tramite in base_emb:
             try:
-                # Asegurarse de que el embedding es una lista y convertirlo a tensor
                 emb_tramite = torch.tensor(tramite["embedding"]).float()
                 score = util.cos_sim(pregunta_emb, emb_tramite).item()
-                if tramite.get("url") is not None:  # Verificar que la URL no sea None
-                    similitudes.append((score, tramite["url"]))
+                
+                logger.info(f"Similarity score for '{tramite.get('titulo')}' with query '{pregunta}': {score}")
+
+                if score >= SIMILARITY_THRESHOLD: 
+                    if tramite.get("url") is not None: 
+                        similitudes.append((score, tramite["url"]))
+                    else:
+                        logger.warning(f"Embedding encontrado sin URL válida: {tramite}")
                 else:
-                    logger.warning(f"Embedding encontrado sin URL válida: {tramite}")
+                    logger.debug(f"Tramite '{tramite.get('titulo')}' excluido por baja similitud: {score}")
+
             except Exception as e:
                 logger.error(f"Error procesando embedding: {e}")
 
@@ -82,18 +88,17 @@ def buscar_tramite_por_embedding(pregunta, top_k=1):
         logger.debug(f"Mejores similitudes encontradas: {mejores}")
 
         resultados = []
-        # Buscar los trámites completos de la base de conocimiento usando las URLs de los mejores embeddings
-        mejores_urls = {url for _, url in mejores}
+        mejores_urls = {url for score, url in mejores if score >= SIMILARITY_THRESHOLD} 
+        
         for t in base:
             try:
-                # Modificado para asegurar que el 'data' del trámite se use correctamente
                 if t.get("url") in mejores_urls:
                     resultados.append(t)
             except Exception as e:
                 logger.error(f"Error procesando trámite de la base: {e}")
 
         if not resultados:
-            logger.warning("No se encontraron datos válidos para las URLs relevantes")
+            logger.warning("No se encontraron datos válidos para las URLs relevantes (quizás por el umbral de similitud)")
         return resultados
 
     except Exception as e:

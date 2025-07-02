@@ -16,9 +16,11 @@ FORBIDDEN_WORDS = [
     "cagón", "cagona", "mierdoso", "pelotudazo", "ortiva", "orto", "reventado",
     "choto", "chota", "pajero", "pajera", "capo", "capo de mierda", "negro de mierda",
     "vago", "vaga", "hijueputa", "nderakore", "kyhyje", "mita'i", "pajagua",
-    "kuña kue", "mbarete", "porombo", "japu", "kaigue", "ñemby","que me importa", "inutil", "asqueroso"
-    "bobo", "payaso", "pendejo", "bobito", "la puta madre", "negro", "negra", "puta", "puto"
-    
+    "kuña kue", "mbarete", "porombo", "japu", "kaigue", "ñemby", "que me importa", "inutil", "asqueroso", # Corrected line
+    "bobo", "payaso", "pendejo", "bobito", "la puta madre", "negro", "negra", "puta", "puto",
+    "topu", "pito", "pija", "poronga", "asco", "pilin","picho","pichon","pichota","pichote",
+    "coño", "cagon", "mitai", "mitaí", "pelotudisimo", "mogolico", "mogolica", "mongol", "inservible",
+    "bobazo","bobada","bobo"
 ]
 
 WHITELIST_WORDS = [

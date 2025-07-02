@@ -4,188 +4,487 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Trámites de Formosa</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1e3a8a',
+                        'primary-light': '#3b82f6',
+                        'primary-dark': '#1e40af',
+                        neutral: {
+                            50: '#f8fafc',
+                            100: '#f1f5f9',
+                            200: '#e2e8f0',
+                            600: '#475569',
+                            700: '#334155',
+                            800: '#1e293b'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        /* Custom scrollbar for chat-box */
-        .chat-box::-webkit-scrollbar {
-            width: 8px;
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+        
+        * { font-family: 'Inter', system-ui, sans-serif; }
+        
+        .chat-container { 
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            min-height: 100vh;
         }
-
-        .chat-box::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 10px;
+        
+        .message { 
+            animation: slideUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            max-width: 85%;
         }
-
-        .chat-box::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 10px;
+        
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-
-        .chat-box::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
-
-        /* Basic styling for messages, if Tailwind defaults aren't enough */
-        .message {
-            padding: 8px 12px;
-            border-radius: 10px;
-            margin-bottom: 8px;
-            max-width: 80%;
-        }
-
+        
         .user-message {
-            background-color: #dbeafe; /* Blue-100 */
-            align-self: flex-end;
+            background: linear-gradient(135deg, #1e3a8a, #1e40af);
+            color: white;
             margin-left: auto;
+            border-radius: 20px 20px 4px 20px;
+            box-shadow: 0 4px 16px rgba(30, 58, 138, 0.2);
         }
-
+        
         .assistant-message {
-            background-color: #e5e7eb; /* Gray-200 */
-            align-self: flex-start;
-            margin-right: auto;
+            background: white;
+            color: #334155;
+            border-radius: 20px 20px 20px 4px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e2e8f0;
         }
-
-        /* Ensure links within markdown are styled correctly */
-        .assistant-message a {
-            color: #2563eb; /* Blue-600 */
+        
+        .loading-dots {
+            display: inline-flex;
+            gap: 4px;
+        }
+        
+        .loading-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #94a3b8;
+            animation: bounce 1.4s infinite both;
+        }
+        
+        .loading-dot:nth-child(2) { animation-delay: 0.16s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.32s; }
+        
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+        
+        .input-field:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .send-btn {
+            background: linear-gradient(135deg, #1e3a8a, #1e40af);
+            transition: all 0.2s ease;
+        }
+        
+        .send-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 25px rgba(30, 58, 138, 0.3);
+        }
+        
+        .clear-btn {
+            background: rgba(30, 58, 138, 0.1);
+            color: #1e3a8a;
+            border: 1px solid rgba(30, 58, 138, 0.2);
+            transition: all 0.2s ease;
+        }
+        
+        .clear-btn:hover {
+            background: rgba(30, 58, 138, 0.15);
+            transform: translateY(-1px);
+        }
+        
+        .scroll-smooth { scroll-behavior: smooth; }
+        
+        .chat-box::-webkit-scrollbar { width: 4px; }
+        .chat-box::-webkit-scrollbar-track { background: transparent; }
+        .chat-box::-webkit-scrollbar-thumb { 
+            background: rgba(148, 163, 184, 0.5);
+            border-radius: 2px;
+        }
+        
+        .typewriter-cursor {
+            display: inline-block;
+            background: #334155;
+            width: 2px;
+            height: 1.2em;
+            animation: blink 1s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+        
+        /* Estilos para contenido markdown */
+        .message-content h1, .message-content h2, .message-content h3 {
+            font-weight: 600;
+            margin: 0.5em 0;
+            color: #1e293b;
+        }
+        
+        .message-content p { margin: 0.5em 0; }
+        .message-content ul, .message-content ol { margin: 0.5em 0; padding-left: 1.5em; }
+        .message-content li { margin: 0.25em 0; }
+        .message-content strong { font-weight: 600; color: #1e293b; }
+        .message-content code {
+            background: #f1f5f9;
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .message-content a {
+            color: #3b82f6;
             text-decoration: underline;
+            font-weight: 500;
         }
+        .message-content a:hover { color: #1d4ed8; }
     </style>
 </head>
-<body class="bg-gray-100 flex flex-col min-h-screen">
-    <div class="bg-white w-full h-screen flex flex-col">
-        <div class="bg-blue-600 text-white p-4 flex justify-between items-center">
-            <h1 class="text-xl font-semibold">Asistente de Trámites 🇦🇷</h1>
-            <button id="clearHistoryBtn" class="bg-blue-700 hover:bg-blue-800 text-white py-1 px-3 rounded-md text-sm">
-                Limpiar Chat
-            </button>
-        </div>
-
-        <div id="chat-box" class="flex-1 p-4 overflow-y-auto flex flex-col-reverse chat-box">
-            <div class="assistant-message message mt-auto">
-                Hola! Soy tu asistente virtual para trámites en Formosa. ¿En qué puedo ayudarte hoy?
+<body class="bg-neutral-50">
+    <div class="chat-container">
+        <div class="max-w-4xl mx-auto h-screen flex flex-col">
+            <!-- Header -->
+            <div class="bg-white shadow-sm border-b border-neutral-200 px-6 py-4">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-primary rounded-full flex items-center justify-center">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h1 class="text-lg font-semibold text-neutral-800">Asistente de Trámites</h1>
+                            <p class="text-sm text-neutral-600">Provincia de Formosa</p>
+                        </div>
+                    </div>
+                    <button id="clearBtn" class="clear-btn px-4 py-2 rounded-lg text-sm font-medium">
+                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        Limpiar
+                    </button>
+                </div>
             </div>
-        </div>
 
-        <div class="p-4 border-t border-gray-200 flex items-center">
-            <input
-                type="text"
-                id="userInput"
-                class="flex-1 border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Escribe tu consulta aquí..."
-                onkeypress="handleKeyPress(event)"
-            >
-            <button
-                id="sendBtn"
-                class="ml-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-                Enviar
-            </button>
+            <!-- Chat Messages -->
+            <div id="chatBox" class="flex-1 p-6 overflow-y-auto chat-box scroll-smooth">
+                <div id="messagesContainer" class="space-y-4">
+                    <div class="message assistant-message p-4">
+                        <div class="flex gap-3">
+                            <div class="w-8 h-8 bg-primary-light rounded-full flex items-center justify-center flex-shrink-0">
+                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                                </svg>
+                            </div>
+                            <div class="message-content">
+                                <p>¡Hola! Soy tu asistente virtual para trámites en la Provincia de Formosa.</p>
+                                <p>¿En qué puedo ayudarte hoy? Puedo guiarte con información sobre documentación, requisitos, horarios y procedimientos.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="bg-white border-t border-neutral-200 p-4">
+                <div class="flex gap-3">
+                    <textarea
+                        id="userInput"
+                        class="input-field flex-1 p-3 border border-neutral-300 rounded-xl resize-none"
+                        placeholder="Escribe tu consulta aquí..."
+                        rows="1"
+                    ></textarea>
+                    <button id="sendBtn" class="send-btn p-3 rounded-xl text-white">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
-
     <script>
-        const chatBox = document.getElementById('chat-box');
-        const userInput = document.getElementById('userInput');
-        const sendBtn = document.getElementById('sendBtn');
-        const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+        class ChatApp {
+            constructor() {
+                this.elements = {
+                    chatBox: document.getElementById('chatBox'),
+                    userInput: document.getElementById('userInput'),
+                    sendBtn: document.getElementById('sendBtn'),
+                    clearBtn: document.getElementById('clearBtn'),
+                    messagesContainer: document.getElementById('messagesContainer')
+                };
+                
+                this.isLoading = false;
+                this.setupEventListeners();
+                this.setupAutoResize();
+                marked.setOptions({ gfm: true, breaks: true });
+            }
 
-        // Initialize marked.js with options if needed (optional, but good practice)
-        marked.setOptions({
-            gfm: true,      // Use GitHub Flavored Markdown
-            breaks: true,   // Add <br> on a single newline
-            // sanitize: true // Uncomment if you want to strip HTML from input (security)
-        });
-
-        // Function to display messages
-        function displayMessage(sender, messageText, isUser) {
-            const messageElement = document.createElement('div');
-            messageElement.classList.add('message', isUser ? 'user-message' : 'assistant-message');
-
-            // Use marked.js to parse Markdown into HTML
-            // This is where links like [Descargar](URL) become clickable <a> tags
-            messageElement.innerHTML = marked.parse(messageText);
-
-            chatBox.prepend(messageElement); // Use prepend to add new messages at the top (for flex-col-reverse)
-            chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom if using flex-col (normal flow)
-                                                    // For flex-col-reverse, it will naturally appear at the bottom
-        }
-
-        // Function to send message to backend
-        async function sendMessage() {
-            const message = userInput.value.trim();
-            if (!message) return;
-
-            displayMessage('user', message, true);
-            userInput.value = ''; // Clear input immediately
-
-            try {
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ mensaje: message })
+            setupEventListeners() {
+                this.elements.sendBtn.addEventListener('click', () => this.sendMessage());
+                this.elements.clearBtn.addEventListener('click', () => this.clearHistory());
+                this.elements.userInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
                 });
-
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    displayMessage('assistant', `Error: ${errorData.respuesta || 'Algo salió mal.'}`, false);
-                    return;
-                }
-
-                const data = await response.json();
-                displayMessage('assistant', data.respuesta, false);
-
-            } catch (error) {
-                console.error('Error sending message:', error);
-                displayMessage('assistant', 'Lo siento, no pude conectar con el servidor. Intenta de nuevo más tarde.', false);
             }
-        }
 
-        // Handle Enter key press
-        function handleKeyPress(event) {
-            if (event.key === 'Enter') {
-                sendMessage();
+            setupAutoResize() {
+                this.elements.userInput.addEventListener('input', function() {
+                    this.style.height = 'auto';
+                    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                });
             }
-        }
 
-        // Event Listeners
-        sendBtn.addEventListener('click', sendMessage);
-        clearHistoryBtn.addEventListener('click', async () => {
-            if (confirm('¿Estás seguro de que quieres limpiar el historial de conversación?')) {
-                try {
-                    const response = await fetch('/api/limpiar_historial', {
-                        method: 'POST'
-                    });
-                    if (response.ok) {
-                        chatBox.innerHTML = `
-                            <div class="assistant-message message mt-auto">
-                                Hola! Soy tu asistente virtual para trámites en Formosa. ¿En qué puedo ayudarte hoy?
+            scrollToBottom() {
+                requestAnimationFrame(() => {
+                    this.elements.chatBox.scrollTop = this.elements.chatBox.scrollHeight;
+                });
+            }
+
+            createMessage(isUser, content = '') {
+                const div = document.createElement('div');
+                div.className = `message ${isUser ? 'user-message ml-auto' : 'assistant-message'} p-4`;
+                
+                if (isUser) {
+                    div.innerHTML = `
+                        <div class="flex gap-3 justify-end">
+                            <div class="text-white">${content}</div>
+                            <div class="w-8 h-8 bg-white bg-opacity-20 rounded-full flex items-center justify-center flex-shrink-0">
+                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                                </svg>
                             </div>
-                        `; // Clear all messages and add initial one
-                        displayMessage('assistant', 'Historial de conversación limpiado.', false);
+                        </div>
+                    `;
+                } else {
+                    div.innerHTML = `
+                        <div class="flex gap-3">
+                            <div class="w-8 h-8 bg-primary-light rounded-full flex items-center justify-center flex-shrink-0">
+                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                                </svg>
+                            </div>
+                            <div class="message-content" data-content></div>
+                        </div>
+                    `;
+                }
+                
+                return div;
+            }
+
+            showLoading() {
+                const loadingMsg = this.createMessage(false);
+                loadingMsg.id = 'loading-message';
+                loadingMsg.querySelector('[data-content]').innerHTML = `
+                    <div class="flex items-center gap-2 text-neutral-600">
+                        <div class="loading-dots">
+                            <div class="loading-dot"></div>
+                            <div class="loading-dot"></div>
+                            <div class="loading-dot"></div>
+                        </div>
+                        <span class="text-sm">Escribiendo...</span>
+                    </div>
+                `;
+                
+                this.elements.messagesContainer.appendChild(loadingMsg);
+                this.scrollToBottom();
+                this.isLoading = true;
+            }
+
+            hideLoading() {
+                const loading = document.getElementById('loading-message');
+                if (loading) loading.remove();
+                this.isLoading = false;
+            }
+
+            calculateTypingSpeed(textLength) {
+                // Velocidad adaptativa basada en la longitud del texto
+                if (textLength < 100) return 20;        // Muy corto: lento para efecto
+                if (textLength < 300) return 12;        // Corto: velocidad normal
+                if (textLength < 600) return 8;         // Medio: más rápido
+                if (textLength < 1200) return 5;        // Largo: muy rápido
+                return 3;                               // Muy largo: súper rápido
+            }
+
+            async typewriterEffect(element, htmlContent) {
+                // Parseamos el HTML y lo procesamos
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(`<div>${htmlContent}</div>`, 'text/html');
+                const container = doc.querySelector('div');
+                
+                // Calculamos la longitud total del texto para determinar velocidad
+                const totalTextLength = container.textContent.length;
+                const typingSpeed = this.calculateTypingSpeed(totalTextLength);
+                
+                element.innerHTML = '';
+                
+                // Función recursiva para procesar nodos
+                const processNode = async (node, targetElement) => {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        // Nodo de texto - efecto typewriter con velocidad adaptativa
+                        const text = node.textContent;
+                        const span = document.createElement('span');
+                        targetElement.appendChild(span);
+                        
+                        // Para textos muy largos, escribimos en chunks más grandes
+                        const chunkSize = typingSpeed <= 5 ? 2 : 1;
+                        
+                        for (let i = 0; i < text.length; i += chunkSize) {
+                            const chunk = text.slice(i, i + chunkSize);
+                            span.textContent += chunk;
+                            
+                            // Scroll más eficiente para textos largos
+                            if (i % 10 === 0 || typingSpeed <= 5) {
+                                this.scrollToBottom();
+                            }
+                            
+                            await new Promise(resolve => setTimeout(resolve, typingSpeed));
+                        }
+                    } else if (node.nodeType === Node.ELEMENT_NODE) {
+                        // Nodo elemento - recrear estructura
+                        const newElement = document.createElement(node.tagName.toLowerCase());
+                        
+                        // Copiar atributos
+                        Array.from(node.attributes).forEach(attr => {
+                            newElement.setAttribute(attr.name, attr.value);
+                        });
+                        
+                        // Aplicar estilos específicos
+                        if (node.tagName.toLowerCase() === 'a') {
+                            newElement.className = 'text-primary-light hover:text-primary-dark underline font-medium';
+                            newElement.target = '_blank';
+                            newElement.rel = 'noopener noreferrer';
+                        } else if (node.tagName.toLowerCase() === 'strong') {
+                            newElement.className = 'font-semibold text-neutral-800';
+                        } else if (node.tagName.toLowerCase() === 'code') {
+                            newElement.className = 'bg-neutral-100 px-2 py-1 rounded text-sm';
+                        }
+                        
+                        targetElement.appendChild(newElement);
+                        
+                        // Procesar hijos
+                        for (const child of node.childNodes) {
+                            await processNode(child, newElement);
+                        }
+                    }
+                };
+                
+                // Procesar todos los nodos hijos
+                for (const child of container.childNodes) {
+                    await processNode(child, element);
+                }
+                
+                // Scroll final para asegurar visibilidad completa
+                this.scrollToBottom();
+            }
+
+            async displayMessage(isUser, content) {
+                if (isUser) {
+                    const userMsg = this.createMessage(true, content);
+                    this.elements.messagesContainer.appendChild(userMsg);
+                    this.scrollToBottom();
+                } else {
+                    this.hideLoading();
+                    const assistantMsg = this.createMessage(false);
+                    this.elements.messagesContainer.appendChild(assistantMsg);
+                    
+                    const contentElement = assistantMsg.querySelector('[data-content]');
+                    const htmlContent = marked.parse(content);
+                    
+                    await this.typewriterEffect(contentElement, htmlContent);
+                    this.scrollToBottom();
+                }
+            }
+
+            async sendMessage() {
+                const message = this.elements.userInput.value.trim();
+                if (!message || this.isLoading) return;
+
+                await this.displayMessage(true, message);
+                
+                this.elements.userInput.value = '';
+                this.elements.userInput.style.height = 'auto';
+                
+                this.showLoading();
+                this.elements.sendBtn.disabled = true;
+
+                try {
+                    const response = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mensaje: message })
+                    });
+
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        await this.displayMessage(false, `❌ **Error**: ${data.respuesta || 'Algo salió mal.'}`);
                     } else {
-                        const errorData = await response.json();
-                        alert(`Error al limpiar historial: ${errorData.mensaje}`);
+                        await this.displayMessage(false, data.respuesta);
                     }
                 } catch (error) {
-                    console.error('Error clearing history:', error);
-                    alert('Error de red al intentar limpiar el historial.');
+                    await this.displayMessage(false, '❌ **Error de conexión**: No pude conectar con el servidor.');
+                } finally {
+                    this.elements.sendBtn.disabled = false;
+                    this.elements.userInput.focus();
                 }
             }
-        });
 
-        // Ensure the chat box starts scrolled to the bottom on load
-        // This is tricky with flex-col-reverse. A small timeout helps.
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                chatBox.scrollTop = chatBox.scrollHeight;
-            }, 100);
-        });
+            async clearHistory() {
+                if (!confirm('¿Estás seguro de que quieres limpiar el historial?')) return;
+                
+                try {
+                    const response = await fetch('/api/limpiar_historial', { method: 'POST' });
+                    
+                    if (response.ok) {
+                        this.elements.messagesContainer.innerHTML = `
+                            <div class="message assistant-message p-4">
+                                <div class="flex gap-3">
+                                    <div class="w-8 h-8 bg-primary-light rounded-full flex items-center justify-center flex-shrink-0">
+                                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                                        </svg>
+                                    </div>
+                                    <div class="message-content">
+                                        <p>¡Hola! Soy tu asistente virtual para trámites en la Provincia de Formosa.</p>
+                                        <p>¿En qué puedo ayudarte hoy?</p>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        await this.displayMessage(false, '✅ **Historial limpiado correctamente**');
+                    }
+                } catch (error) {
+                    alert('Error al limpiar el historial');
+                }
+            }
+        }
 
+        // Inicializar la aplicación
+        new ChatApp();
     </script>
 </body>
 </html>

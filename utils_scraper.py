@@ -60,7 +60,6 @@ def descubrir_urls_tramites():
         urls_visitadas.add(url_actual)
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Buscar enlaces de trámites dentro de .list-group
         for a in soup.select("div.list-group a[href]"):
             href = a["href"].strip()
             href = urljoin(BASE_URL, href)
@@ -72,7 +71,6 @@ def descubrir_urls_tramites():
             elif "/tramites" in href and href not in urls_visitadas and href not in urls_por_visitar:
                  urls_por_visitar.add(href)
 
-        # Buscar enlaces de paginación específicamente en la paginación ul
         for li in soup.select("ul.pagination li a"):
             href = li.get("href")
             if href:
