@@ -228,9 +228,10 @@ def generar_respuesta_contextual(mensaje_usuario, historial_conversacion=None, c
                 "error": True
             }
 
-    return {
-        "mensaje": ia.get('respuesta', "Lo siento, no pude procesar tu solicitud."),
-    }
+        return {
+            "mensaje": ia.get('respuesta', "Lo siento, no pude procesar tu solicitud."),
+        }
+
 
 
     ubics = datos_tramite.get('opciones_ubicacion') or []
